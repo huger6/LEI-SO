@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <getopt.h>
 
 #include "results.h"
 #include "utils.h"
@@ -20,7 +24,7 @@ int main(int argc, char *argv[]) {
     char *output_file = NULL;
     int opt;
 
-    // Ler parâmetro -o (em qualquer posição)
+    // Read -o in any position
     while ((opt = getopt(argc, argv, "o:")) != -1) {
         switch (opt) {
             case 'o':
@@ -33,7 +37,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Extrair ficheiros ignorando -o e o seu argumento
+    // Extract files ignoring -o and its argument
     char *files[MAX_FILES];
     int file_count = 0;
 
@@ -48,11 +52,11 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Para guardar todos os resultados
+    // To store all results
     Result results[MAX_FILES];
     int results_count = 0;
 
-    // Um pipe por ficheiro
+    // One pipe per file
     int pipefd[MAX_FILES][2];
 
     for (int i = 0; i < file_count; i++) {
@@ -70,7 +74,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (pid == 0) {
-            // ---------------- FILHO ----------------
+            // ---------------- CHILD ----------------
             close(pipefd[i][READ_END]);
 
             Result res;
@@ -88,7 +92,7 @@ int main(int argc, char *argv[]) {
             exit(0);
         }
 
-        // ---------------- PAI ----------------
+        // ---------------- PARENT ----------------
         close(pipefd[i][WRITE_END]);
 
         Result res;
@@ -98,10 +102,11 @@ int main(int argc, char *argv[]) {
         results[results_count++] = res;
     }
 
-    // Esperar por TODOS os filhos
+
+    // Wait for ALL children
     while (wait(NULL) > 0);
 
-    // Imprimir tudo com a função da segunda versão
+    // Print everything with the function from the second version
     print_results(results, results_count, output_file);
 
     return 0;
