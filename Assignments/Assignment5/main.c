@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
     char *output_file = NULL;
     int opt;
 
-    // Parse command line options (-o can appear anywhere)
+    // Ler parâmetro -o (em qualquer posição)
     while ((opt = getopt(argc, argv, "o:")) != -1) {
         switch (opt) {
             case 'o':
@@ -33,90 +33,76 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Extract file names, ignoring -o and its argument
-    char *files[50];
-    int num_files = 0;
+    // Extrair ficheiros ignorando -o e o seu argumento
+    char *files[MAX_FILES];
+    int file_count = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0) { i++; continue; } // skip -o and its filename
-        if (argv[i][0] == '-') continue; // skip any other option
-        files[num_files++] = argv[i];
+        if (strcmp(argv[i], "-o") == 0) { i++; continue; }
+        if (argv[i][0] == '-') continue;
+        files[file_count++] = argv[i];
     }
 
-    if (num_files == 0) {
+    if (file_count == 0) {
         fprintf(stderr, "No input files provided.\n");
         exit(EXIT_FAILURE);
     }
 
-    // Pipe
-    int fd[2];
-    if (pipe(fd) == -1) {
-        perror("pipe");
-        exit(EXIT_FAILURE);
-    }
+    // Para guardar todos os resultados
+    Result results[MAX_FILES];
+    int results_count = 0;
 
-    pid_t pid;
-    int i;
+    // Um pipe por ficheiro
+    int pipefd[MAX_FILES][2];
 
-    // Each process creates the next one
-    for (i = 0; i < num_files; i++) {
+    for (int i = 0; i < file_count; i++) {
 
-        pid = fork();
+        if (pipe(pipefd[i]) == -1) {
+            perror("pipe");
+            exit(EXIT_FAILURE);
+        }
+
+        pid_t pid = fork();
 
         if (pid < 0) {
             perror("fork");
             exit(EXIT_FAILURE);
         }
 
-        if (pid > 0) {
-            break;
+        if (pid == 0) {
+            // ---------------- FILHO ----------------
+            close(pipefd[i][READ_END]);
+
+            Result res;
+            memset(&res, 0, sizeof(Result));
+
+            res.pid = getpid();
+            res.ppid = getppid();
+            snprintf(res.filename, sizeof(res.filename), "%s", files[i]);
+
+            count(files[i], &res.lines, &res.words, &res.chars);
+
+            write(pipefd[i][WRITE_END], &res, sizeof(Result));
+            close(pipefd[i][WRITE_END]);
+
+            exit(0);
         }
+
+        // ---------------- PAI ----------------
+        close(pipefd[i][WRITE_END]);
+
+        Result res;
+        read(pipefd[i][READ_END], &res, sizeof(Result));
+        close(pipefd[i][READ_END]);
+
+        results[results_count++] = res;
     }
 
-    // Determine file index for this process in the chain
-    int my_index;
-    if (pid > 0)
-        my_index = i; // parent in chain
-    else
-        my_index = num_files - 1; // last child in chain
-
-    Result res;
-    memset(&res, 0, sizeof(Result));
-
-    res.pid = getpid();
-    res.ppid = getppid();
-    snprintf(res.filename, sizeof(res.filename), "%s", files[my_index]);
-
-    count(files[my_index], &res.lines, &res.words, &res.chars);
-
-    // Write this result into the pipe
-    close(fd[0]); // Close read end
-    write(fd[1], &res, sizeof(Result));
-    close(fd[1]);
-
-    // Gather results with the original parent
-    if (getppid() != getpid()) {
-        // All children simply exit after sending results.
-        exit(EXIT_SUCCESS);
-    }
-
-    // Wait for all children
+    // Esperar por TODOS os filhos
     while (wait(NULL) > 0);
 
-    // Read results from pipe
-    close(fd[1]); // close write end
-
-    Result results[50];
-    int count_results = 0;
-
-    while (read(fd[0], &res, sizeof(Result)) > 0) {
-        results[count_results++] = res;
-    }
-
-    close(fd[0]);
-
-    // Print results
-    print_results(results, count_results, output_file);
+    // Imprimir tudo com a função da segunda versão
+    print_results(results, results_count, output_file);
 
     return 0;
 }
